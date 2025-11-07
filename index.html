@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Decentralized Encrypted Storage</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.min.js"></script>
+  <script src="https://unpkg.com/@lighthouse-web3/sdk/dist/lighthouse.min.js"></script>
+  <style>
+    body { font-family: Arial; padding: 2rem; background: #111; color: #eee; }
+    input, button { margin: 0.4rem; padding: 0.4rem; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h2>🔐 Polygon + Lighthouse Storage dApp</h2>
+  <p>Connect wallet, choose file, and upload securely to IPFS/Filecoin.</p>
+
+  <input type="file" id="fileInput" />
+  <button onclick="connectWallet()">🦊 Connect Wallet</button>
+  <button onclick="uploadEncrypted()">⬆️ Upload Encrypted</button>
+  <br />
+  <input type="text" id="cidInput" placeholder="Enter CID to download" />
+  <button onclick="decryptDownload()">⬇️ Download / Decrypt</button>
+  <br />
+  <input type="text" id="shareCid" placeholder="CID to share" />
+  <input type="text" id="shareAddr" placeholder="Wallet to share with" />
+  <button onclick="shareAccess()">👥 Grant Access</button>
+  <br />
+  <input type="text" id="revokeCid" placeholder="CID to revoke" />
+  <input type="text" id="revokeAddr" placeholder="Wallet to revoke" />
+  <button onclick="revokeAccess()">🚫 Revoke Access</button>
+  <br />
+  <input type="text" id="deleteCid" placeholder="CID to delete" />
+  <button onclick="deleteFile()">🗑️ Delete</button>
+
+  <script type="module">
+    // Contract ABI
+    const FileRegistryABI = [{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"}],"name":"AccessGranted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"}],"name":"AccessRevoked","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"}],"name":"FileDeleted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"},{"indexed":false,"internalType":"string","name":"fileName","type":"string"}],"name":"FileUploaded","type":"event"},{"inputs":[{"internalType":"string","name":"cid","type":"string"}],"name":"deleteFile","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string","name":"cid","type":"string"}],"name":"getFile","outputs":[{"components":[{"internalType":"string","name":"cid","type":"string"},{"internalType":"string","name":"fileName","type":"string"},{"internalType":"address","name":"owner","type":"address"},{"internalType":"uint256","name":"uploadTime","type":"uint256"},{"internalType":"bool","name":"exists","type":"bool"}],"internalType":"struct FileRegistry.FileInfo","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"},{"internalType":"string","name":"cid","type":"string"}],"name":"grantAccess","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"},{"internalType":"string","name":"cid","type":"string"}],"name":"hasAccess","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"},{"internalType":"string","name":"cid","type":"string"}],"name":"revokeAccess","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string","name":"cid","type":"string"},{"internalType":"string","name":"fileName","type":"string"}],"name":"uploadFile","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+
+    const LIGHTHOUSE_API_KEY = "63582a6b.0eefd5ecc0a44790b049e60f5645c30d";
+    const CONTRACT_ADDRESS = "0x33e0ffe5340fe8Aacf11F2f1FB67A469E4607545";
+
+    let provider, signer, contract;
+
+    async function connectWallet() {
+      if (!window.ethereum) return alert("Install MetaMask!");
+      provider = new ethers.BrowserProvider(window.ethereum);
+      signer = await provider.getSigner();
+      contract = new ethers.Contract(CONTRACT_ADDRESS, FileRegistryABI, signer);
+      alert(`Connected: ${await signer.getAddress()}`);
+    }
+    window.connectWallet = connectWallet;
+
+    async function uploadEncrypted() {
+      const file = document.getElementById("fileInput").files[0];
+      if (!file) return alert("Select a file first.");
+
+      const output = await lighthouse.uploadEncrypted(file, LIGHTHOUSE_API_KEY, p => {
+        console.log(`Uploading: ${(p.uploaded / p.total) * 100}%`);
+      });
+
+      const cid = output.data.Hash;
+      console.log("Uploaded CID:", cid);
+
+      const tx = await contract.uploadFile(cid, file.name);
+      await tx.wait();
+
+      alert(`✅ Uploaded and encrypted!\nCID: ${cid}`);
+    }
+    window.uploadEncrypted = uploadEncrypted;
+
+    async function decryptDownload() {
+      const cid = document.getElementById("cidInput").value;
+      if (!cid) return alert("Enter a CID.");
+
+      const has = await contract.hasAccess(await signer.getAddress(), cid);
+      if (!has) return alert("No access to this file.");
+
+      const fileResp = await lighthouse.decryptFile(cid, LIGHTHOUSE_API_KEY);
+      const blob = new Blob([fileResp.data]);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "decrypted_" + Date.now();
+      link.click();
+      alert("✅ File decrypted and downloaded.");
+    }
+    window.decryptDownload = decryptDownload;
+
+    async function shareAccess() {
+      const cid = document.getElementById("shareCid").value;
+      const addr = document.getElementById("shareAddr").value;
+      await contract.grantAccess(addr, cid);
+      await lighthouse.shareFile(LIGHTHOUSE_API_KEY, cid, [addr]);
+      alert(`✅ Access granted to ${addr}`);
+    }
+    window.shareAccess = shareAccess;
+
+    async function revokeAccess() {
+      const cid = document.getElementById("revokeCid").value;
+      const addr = document.getElementById("revokeAddr").value;
+      await contract.revokeAccess(addr, cid);
+      await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, [addr]);
+      alert(`🚫 Access revoked from ${addr}`);
+    }
+    window.revokeAccess = revokeAccess;
+
+    async function deleteFile() {
+      const cid = document.getElementById("deleteCid").value;
+      await contract.deleteFile(cid);
+      await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, []);
+      alert(`🗑️ File ${cid} deleted and access revoked`);
+    }
+    window.deleteFile = deleteFile;
+  </script>
+</body>
+</html>
