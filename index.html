@@ -16,27 +16,29 @@
   <p>Connect wallet, choose file, and upload securely to IPFS/Filecoin.</p>
 
   <input type="file" id="fileInput" />
-  <button id="connectBtn">🦊 Connect Wallet</button>
-  <button id="uploadBtn">⬆️ Upload Encrypted</button>
+  <button onclick="connectWallet()">🦊 Connect Wallet</button>
+  <button onclick="uploadEncrypted()">⬆️ Upload Encrypted</button>
   <br />
   <input type="text" id="cidInput" placeholder="Enter CID to download" />
-  <button id="downloadBtn">⬇️ Download / Decrypt</button>
+  <button onclick="decryptDownload()">⬇️ Download / Decrypt</button>
   <br />
   <input type="text" id="shareCid" placeholder="CID to share" />
   <input type="text" id="shareAddr" placeholder="Wallet to share with" />
-  <button id="shareBtn">👥 Grant Access</button>
+  <button onclick="shareAccess()">👥 Grant Access</button>
   <br />
   <input type="text" id="revokeCid" placeholder="CID to revoke" />
   <input type="text" id="revokeAddr" placeholder="Wallet to revoke" />
-  <button id="revokeBtn">🚫 Revoke Access</button>
+  <button onclick="revokeAccess()">🚫 Revoke Access</button>
   <br />
   <input type="text" id="deleteCid" placeholder="CID to delete" />
-  <button id="deleteBtn">🗑️ Delete</button>
+  <button onclick="deleteFile()">🗑️ Delete</button>
 
   <script type="module">
-    // ---------------- CONFIG ----------------
-    const LIGHTHOUSE_API_KEY = "63582a6b0eefd5ecc0a44790b049e60f5645c30d";
+    // ======= CONTRACT SETTINGS =======
+    const LIGHTHOUSE_API_KEY = "63582a6b.0eefd5ecc0a44790b049e60f5645c30d";
     const CONTRACT_ADDRESS = "0x33e0ffe5340fe8Aacf11F2f1FB67A469E4607545";
+
+    // ======= EMBEDDED ABI =======
     const FileRegistryABI = [
       {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"}],"name":"AccessGranted","type":"event"},
       {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"cid","type":"string"}],"name":"AccessRevoked","type":"event"},
@@ -52,87 +54,116 @@
 
     let provider, signer, contract;
 
-    // ---------------- WALLET ----------------
+    // ======= CONNECT WALLET =======
     async function connectWallet() {
       try {
-        if (!window.ethereum) return alert("MetaMask not detected. Install MetaMask first.");
+        if (!window.ethereum) throw new Error("MetaMask not found, install it!");
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
         provider = new ethers.BrowserProvider(window.ethereum);
-        await provider.send("eth_requestAccounts", []);
         signer = await provider.getSigner();
         contract = new ethers.Contract(CONTRACT_ADDRESS, FileRegistryABI, signer);
-        const addr = await signer.getAddress();
-        alert(`Connected: ${addr}`);
-      } catch(e) {
-        console.error(e);
-        alert("Failed to connect wallet.");
+        const address = await signer.getAddress();
+        alert(`✅ Connected: ${address}`);
+      } catch (err) {
+        alert("❌ Failed to connect wallet: " + err.message);
       }
     }
-    document.getElementById("connectBtn").onclick = connectWallet;
+    window.connectWallet = connectWallet;
 
-    // ---------------- UPLOAD ----------------
+    // ======= UPLOAD ENCRYPTED FILE =======
     async function uploadEncrypted() {
-      const file = document.getElementById("fileInput").files[0];
-      if (!file) return alert("Select a file first.");
-      const output = await lighthouse.uploadEncrypted(file, LIGHTHOUSE_API_KEY, p => {
-        console.log(`Uploading: ${(p.uploaded / p.total * 100).toFixed(2)}%`);
-      });
-      const cid = output.data.Hash;
-      console.log("Uploaded CID:", cid);
-      const tx = await contract.uploadFile(cid, file.name);
-      await tx.wait();
-      alert(`✅ Uploaded and encrypted!\nCID: ${cid}`);
-    }
-    document.getElementById("uploadBtn").onclick = uploadEncrypted;
+      try {
+        const file = document.getElementById("fileInput").files[0];
+        if (!file) return alert("Select a file first.");
 
-    // ---------------- DOWNLOAD ----------------
+        const output = await lighthouse.uploadEncrypted(file, LIGHTHOUSE_API_KEY, p => {
+          console.log(`Uploading: ${(p.uploaded / p.total * 100).toFixed(2)}%`);
+        });
+
+        const cid = output.data.Hash;
+        console.log("Uploaded CID:", cid);
+
+        const tx = await contract.uploadFile(cid, file.name);
+        await tx.wait();
+
+        alert(`✅ Uploaded and encrypted!\nCID: ${cid}`);
+      } catch (err) {
+        alert("❌ Upload failed: " + err.message);
+      }
+    }
+    window.uploadEncrypted = uploadEncrypted;
+
+    // ======= DOWNLOAD & DECRYPT FILE =======
     async function decryptDownload() {
-      const cid = document.getElementById("cidInput").value;
-      if (!cid) return alert("Enter a CID.");
-      const has = await contract.hasAccess(await signer.getAddress(), cid);
-      if (!has) return alert("No access to this file.");
-      const fileResp = await lighthouse.decryptFile(cid, LIGHTHOUSE_API_KEY);
-      const blob = new Blob([fileResp.data]);
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "decrypted_" + Date.now();
-      link.click();
-      alert("✅ File decrypted and downloaded.");
-    }
-    document.getElementById("downloadBtn").onclick = decryptDownload;
+      try {
+        const cid = document.getElementById("cidInput").value;
+        if (!cid) return alert("Enter CID.");
 
-    // ---------------- SHARE ----------------
+        const has = await contract.hasAccess(await signer.getAddress(), cid);
+        if (!has) return alert("❌ You don't have access to this file.");
+
+        const fileResp = await lighthouse.decryptFile(cid, LIGHTHOUSE_API_KEY);
+        const blob = new Blob([fileResp.data]);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "decrypted_" + Date.now();
+        link.click();
+        alert("✅ File decrypted and downloaded.");
+      } catch (err) {
+        alert("❌ Download failed: " + err.message);
+      }
+    }
+    window.decryptDownload = decryptDownload;
+
+    // ======= SHARE ACCESS =======
     async function shareAccess() {
-      const cid = document.getElementById("shareCid").value;
-      const addr = document.getElementById("shareAddr").value;
-      if(!cid || !addr) return alert("Enter CID and wallet address.");
-      await contract.grantAccess(addr, cid);
-      await lighthouse.shareFile(LIGHTHOUSE_API_KEY, cid, [addr]);
-      alert(`✅ Access granted to ${addr}`);
-    }
-    document.getElementById("shareBtn").onclick = shareAccess;
+      try {
+        const cid = document.getElementById("shareCid").value;
+        const addr = document.getElementById("shareAddr").value;
+        if (!cid || !addr) return alert("Enter CID and wallet address.");
 
-    // ---------------- REVOKE ----------------
+        await contract.grantAccess(addr, cid);
+        await lighthouse.shareFile(LIGHTHOUSE_API_KEY, cid, [addr]);
+        alert(`✅ Access granted to ${addr}`);
+      } catch (err) {
+        alert("❌ Share failed: " + err.message);
+      }
+    }
+    window.shareAccess = shareAccess;
+
+    // ======= REVOKE ACCESS =======
     async function revokeAccess() {
-      const cid = document.getElementById("revokeCid").value;
-      const addr = document.getElementById("revokeAddr").value;
-      if(!cid || !addr) return alert("Enter CID and wallet address.");
-      await contract.revokeAccess(addr, cid);
-      await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, [addr]);
-      alert(`🚫 Access revoked from ${addr}`);
-    }
-    document.getElementById("revokeBtn").onclick = revokeAccess;
+      try {
+        const cid = document.getElementById("revokeCid").value;
+        const addr = document.getElementById("revokeAddr").value;
+        if (!cid || !addr) return alert("Enter CID and wallet address.");
 
-    // ---------------- DELETE ----------------
+        await contract.revokeAccess(addr, cid);
+        await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, [addr]);
+        alert(`🚫 Access revoked from ${addr}`);
+      } catch (err) {
+        alert("❌ Revoke failed: " + err.message);
+      }
+    }
+    window.revokeAccess = revokeAccess;
+
+    // ======= DELETE FILE =======
     async function deleteFile() {
-      const cid = document.getElementById("deleteCid").value;
-      if(!cid) return alert("Enter CID to delete.");
-      await contract.deleteFile(cid);
-      await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, []);
-      alert(`🗑️ File ${cid} deleted and access revoked`);
-    }
-    document.getElementById("deleteBtn").onclick = deleteFile;
+      try {
+        const cid = document.getElementById("deleteCid").value;
+        if (!cid) return alert("Enter CID to delete.");
 
+        await contract.deleteFile(cid);
+        await lighthouse.revokeFileAccess(LIGHTHOUSE_API_KEY, cid, []);
+        alert(`🗑️ File ${cid} deleted and access revoked`);
+      } catch (err) {
+        alert("❌ Delete failed: " + err.message);
+      }
+    }
+    window.deleteFile = deleteFile;
   </script>
 </body>
 </html>
+
+
 
